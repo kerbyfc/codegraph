@@ -2760,7 +2760,7 @@ export class ExtractionOrchestrator {
   /**
    * Index a single file
    */
-  async indexFile(relativePath: string): Promise<ExtractionResult> {
+  async indexFile(relativePath: string, forceStore = false): Promise<ExtractionResult> {
     // Indexing read: follow in-root symlinks (the `../` guard still applies), #935.
     const fullPath = validatePathWithinRoot(this.rootDir, relativePath, { allowSymlinkEscape: true });
 
@@ -2803,7 +2803,7 @@ export class ExtractionOrchestrator {
       };
     }
 
-    return this.indexFileWithContent(relativePath, content, stats);
+    return this.indexFileWithContent(relativePath, content, stats, forceStore);
   }
 
   /**
@@ -2813,7 +2813,8 @@ export class ExtractionOrchestrator {
   async indexFileWithContent(
     relativePath: string,
     content: string,
-    stats: fs.Stats
+    stats: fs.Stats,
+    forceStore = false
   ): Promise<ExtractionResult> {
     // Prevent `../` traversal; follow in-root symlinks like the directory walk (#935).
     const fullPath = validatePathWithinRoot(this.rootDir, relativePath, { allowSymlinkEscape: true });
@@ -2846,7 +2847,7 @@ export class ExtractionOrchestrator {
         ],
         durationMs: 0,
       };
-      await this.storeExtractionResult(relativePath, content, language, stats, result, createYielder());
+      await this.storeExtractionResult(relativePath, content, language, stats, result, createYielder(), forceStore);
       return result;
     }
 
@@ -2868,7 +2869,7 @@ export class ExtractionOrchestrator {
     const result = extractFromSource(relativePath, content, language, frameworkNames);
 
     // Store in database
-    await this.storeExtractionResult(relativePath, content, language, stats, result, createYielder());
+    await this.storeExtractionResult(relativePath, content, language, stats, result, createYielder(), forceStore);
 
     return result;
   }
@@ -2910,7 +2911,8 @@ export class ExtractionOrchestrator {
     language: Language,
     stats: fs.Stats,
     result: ExtractionResult,
-    onYield?: MaybeYield
+    onYield?: MaybeYield,
+    forceStore = false
   ): Promise<void> {
     // The file was never parsed: its grammar failed to load (#2335). Storing
     // this would replace the file's symbols with an empty row under the new
@@ -2940,7 +2942,7 @@ export class ExtractionOrchestrator {
     // successful retry's symbols — a permanent empty file presented as
     // recovered (the #1541 wipe, reintroduced through the marker path).
     const existingFile = this.queries.getFileByPath(filePath);
-    if (existingFile && existingFile.contentHash === contentHash) {
+    if (!forceStore && existingFile && existingFile.contentHash === contentHash) {
       const existingIsMarker =
         existingFile.nodeCount === 0 && (existingFile.errors?.length ?? 0) > 0;
       const incomingHasContent = result.nodes.length > 0;
@@ -3291,6 +3293,7 @@ export class ExtractionOrchestrator {
     });
 
     const filesToIndex: string[] = [];
+    const godotReindex = new Set<string>();
     const failedFilePaths: string[] = [];
     // === Filesystem reconcile (git-independent) ===
     // The source of truth for "what changed" is the filesystem vs the indexed
@@ -3483,6 +3486,36 @@ export class ExtractionOrchestrator {
       }
     }
 
+    // Autoload names bind unchanged scripts through project.godot. Re-extract
+    // those scripts when the config changes, including on scoped watcher syncs;
+    // otherwise their already-resolved call edges keep the old singleton target.
+    const godotConfigs = [...changedFilePaths, ...removed.map((f) => f.path)]
+      .filter((file) => path.posix.basename(file) === 'project.godot');
+    if (godotConfigs.length > 0) {
+      const queued = new Set(filesToIndex);
+      for (const file of this.queries.getAllFiles()) {
+        if (file.language !== 'gdscript' || queued.has(file.path) || !fs.existsSync(path.join(this.rootDir, file.path))) continue;
+        const affected = godotConfigs.some((config) => {
+          const root = path.posix.dirname(config);
+          const relative = path.posix.relative(root, file.path);
+          if (relative === '..' || relative.startsWith('../')) return false;
+          let dir = path.posix.dirname(file.path);
+          while (dir !== root && dir !== '.') {
+            if (fs.existsSync(path.join(this.rootDir, dir, 'project.godot'))) return false;
+            dir = path.posix.dirname(dir);
+          }
+          return dir === root;
+        });
+        if (!affected) continue;
+        onFileChange?.(file.path);
+        queued.add(file.path);
+        godotReindex.add(file.path);
+        filesToIndex.push(file.path);
+        changedFilePaths.push(file.path);
+        filesModified++;
+      }
+    }
+
     // Sampled here — after the add/modify classification, before any file is
     // re-extracted — because `storeExtractionResult` deletes a file's nodes
     // before inserting the new ones, so this is the last point the pre-edit
@@ -3508,7 +3541,7 @@ export class ExtractionOrchestrator {
         currentFile: filePath,
       });
 
-      const result = await this.indexFile(filePath);
+      const result = await this.indexFile(filePath, godotReindex.has(filePath));
       if (result.errors.some(e => e.severity === 'error')) failedFilePaths.push(filePath);
       if (!hasGrammarLoadFailure(result.errors)) nodesUpdated += result.nodes.length; // else nothing was stored (#2335)
 

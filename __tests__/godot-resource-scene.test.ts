@@ -122,6 +122,20 @@ describe('godot scenes', () => {
       .all();
     expect(nodeRefs).toContainEqual({ sn: 'touch', tk: 'component', tn: 'Label' });
 
+    // Scene-path context survives edge resurrection and failed-ref retries.
+    const scenePath = path.join(dir, 'scenes', 'bar.tscn');
+    const sceneSource = fs.readFileSync(scenePath, 'utf8');
+    fs.unlinkSync(scenePath);
+    await cg.sync({ paths: ['scenes/bar.tscn'] });
+    fs.writeFileSync(scenePath, sceneSource);
+    await cg.sync({ paths: ['scenes/bar.tscn'] });
+    const restored = db.prepare(`SELECT e.metadata FROM edges e
+      JOIN nodes s ON s.id = e.source JOIN nodes t ON t.id = e.target
+      WHERE s.name = 'touch' AND t.name = 'Label' AND e.kind = 'references'`).all();
+    expect(restored.length).toBeGreaterThan(0);
+    expect(restored.every((r: any) => JSON.parse(r.metadata).refName.startsWith('godot-node:'))).toBe(true);
+
+
     cg.destroy();
   });
 });
