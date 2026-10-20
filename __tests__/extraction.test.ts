@@ -104,6 +104,10 @@ describe('same-line node identity (#1349)', () => {
 });
 
 describe('Language Detection', () => {
+  it('should detect Godot GDScript files', () => {
+    expect(detectLanguage('actors/player.gd')).toBe('gdscript');
+  });
+
   it('should detect TypeScript files', () => {
     expect(detectLanguage('src/index.ts')).toBe('typescript');
     expect(detectLanguage('components/Button.tsx')).toBe('tsx');
