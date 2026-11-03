@@ -28,6 +28,7 @@ import { isGeneratedFile } from '../extraction/generated-detection';
 import { stripCommentsForRegex } from './strip-comments';
 import { cFnPointerDispatchEdges } from './c-fnptr-synthesizer';
 import { goframeRouteEdges } from './goframe-synthesizer';
+import { gdscriptSignalEdges } from './gdscript-synthesizer';
 import { expoRouterReturnEdges } from './expo-router-synthesizer';
 import { nextLinkEdges } from './next-router-synthesizer';
 import { reactRouterLinkEdges } from './react-router-synthesizer';
@@ -4521,6 +4522,7 @@ export function hasSynthesisPattern(filePath: string, content: string): boolean 
  * run because interfaceOverrideEdges reads their edges from the DB.
  */
 export const SYNTH_PASSES: SynthPassDef[] = [
+  { name: 'gdscriptSignalEdges', gate: (has) => has('gdscript'), run: (q, c, y) => gdscriptSignalEdges(q, c, y) },
   { name: 'fieldEdges', gate: ALWAYS, run: (q, c, y) => fieldChannelEdges(q, c, y) },
   { name: 'closureCollEdges', gate: ALWAYS, run: (q, c, y) => closureCollectionEdges(q, c, y) },
   // Cross-tier channels — a client's `fetch('/api/x')` onto its own route,

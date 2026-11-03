@@ -4,6 +4,7 @@
  * Handles symbol name matching for reference resolution.
  */
 
+import { matchGdscriptReference } from './gdscript';
 import * as fs from 'fs';
 import * as path from 'path';
 import { Language, Node } from '../types';
@@ -16803,6 +16804,14 @@ function matchReferenceInner(
   ref: UnresolvedRef,
   context: ResolutionContext
 ): ResolvedRef | null {
+  if (ref.language === 'gdscript') {
+    if (ref.referenceKind === 'references' && ref.referenceName.startsWith('godot-node:')) {
+      // Scene node paths retain the existing Godot resource matching path.
+      const scene = matchReferenceInner({ ...ref, referenceName: ref.referenceName.slice('godot-node:'.length).replace(/::/g, '/'), language: 'godot_resource' }, context);
+      return scene ? { ...scene, original: ref } : null;
+    } else return matchGdscriptReference(ref, context);
+  }
+
   // Function-as-value refs (#756) resolve ONLY through the dedicated matcher —
   // never the fuzzy/qualified fallthrough below (a wrong callback edge is
   // worse than none).

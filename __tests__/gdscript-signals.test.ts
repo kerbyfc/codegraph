@@ -30,7 +30,7 @@ describe('gdscript signals and imports', () => {
       path.join(dir, 'src', 'signals.gd'),
       [
         'extends Node',
-        '',
+        'class_name SignalEmitter',
         'signal data_loaded(request_id: String)',
         '',
         'func emit_it() -> void:',
@@ -45,7 +45,7 @@ describe('gdscript signals and imports', () => {
         'func legacy_connect() -> void:',
         '\tconnect("data_loaded", Callable(self, "_on_data_loaded"))',
         '',
-        'func subscribe(other: Node) -> void:',
+        'func subscribe(other: SignalEmitter) -> void:',
         '\tother.data_loaded.connect(_on_data_loaded)',
         '',
         'func engine_signal(tween: Tween) -> void:',
